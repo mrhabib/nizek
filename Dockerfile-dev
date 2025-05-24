@@ -1,0 +1,87 @@
+FROM php:8.1-fpm
+
+RUN echo "extension=timezonedb.so" > /usr/local/etc/php/conf.d/docker-php-ext-timezonedb.ini
+ADD ./supervisor /etc/supervisor
+
+# Set permissions for cron job and initialize cron log
+RUN chmod +rwx /var/www && \
+    chmod 0644 /etc/cron.d/schedule-run-cron && \
+    crontab /etc/cron.d/schedule-run-cron && \
+    touch /var/log/cron.log
+
+# Install system dependencies
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    supervisor \
+    openssl \
+    cron \
+    wget \
+    libgmp-dev \
+    gnupg \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    libmcrypt-dev \
+    default-mysql-client \
+    zlib1g-dev \
+    nginx \
+    build-essential \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    locales \
+    zip \
+    jpegoptim optipng pngquant gifsicle \
+    vim \
+    unzip \
+    git \
+    curl \
+    libzip-dev \
+    libonig-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install PHP extensions
+RUN docker-php-ext-install \
+    bcmath \
+    curl \
+    mysqli \
+    xml \
+    gd \
+    zip \
+    pdo_mysql \
+    sockets \
+    mbstring \
+    gmp
+
+# Install and enable PECL extensions
+RUN pecl install mongodb mcrypt-1.0.5 timezonedb && \
+    docker-php-ext-enable mongodb pdo_mysql mcrypt
+
+# Copy Supervisor configuration files
+COPY ./docker/supervisor/supervisord.conf /etc/supervisor/supervisord.conf
+COPY ./docker/supervisor/conf.d/ /etc/supervisor/conf.d/
+
+# Set default CMD to Supervisord
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+RUN chmod +x /usr/bin/composer
+
+# Set working directory
+WORKDIR /var/www
+
+# Copy application code
+COPY ./ ./
+
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader
+
+# Set permissions for Laravel folders
+RUN chown -R www-data:www-data /var/www && \
+    chmod -R 755 /var/www/storage
+
+
+
+# Run the post-deploy script by default
+CMD [ "sh", "./post_deploy.sh" ]
+# Expose port
+EXPOSE 4444
